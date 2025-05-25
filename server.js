@@ -4,17 +4,13 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mysql = require('mysql2');
+import pool from './db.js'; // 👈 importa la conexión
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
-});
+
 
 // Ruta de prueba
 app.get('/test', async (req, res) => {
@@ -25,6 +21,9 @@ app.get('/test', async (req, res) => {
     console.error(error);
     res.status(500).json({ message: 'Error en la conexión a la base de datos' });
   }
+});
+app.get('/', (req, res) => {
+  res.send('Backend funcionando, prueba otras rutas como /test');
 });
 
 // Login

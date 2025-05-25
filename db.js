@@ -1,3 +1,4 @@
+// db.js
 import 'dotenv/config';
 import mysql from 'mysql2';
 
@@ -8,4 +9,4 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME
 });
 
-module.exports = pool.promise();
+export default pool.promise();
