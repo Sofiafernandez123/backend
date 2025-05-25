@@ -1,131 +1,341 @@
-const dotenv = require('dotenv');
-dotenv.config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const mysql = require('mysql2');
-import pool from './db.js'; // 👈 importa la conexión
-
+const { pool } = require('./db');
 const app = express();
+
+// ======================
+// Configuration
+// ======================
+const PORT = process.env.APP_PORT || 3001;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// ======================
+// Middlewares
+// ======================
 app.use(cors());
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
+// Logging middleware for development
+if (NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+  });
+}
 
+// ======================
+// Database Health Check
+// ======================
+const checkDatabaseConnection = async () => {
+  try {
+    const [rows] = await pool.query('SELECT 1');
+    return rows.length > 0;
+  } catch (error) {
+    console.error('Database health check failed:', error);
+    return false;
+  }
+};
 
-// Ruta de prueba
+// ======================
+// Routes
+// ======================
+
+// Health Check Endpoint
+app.get('/health', async (req, res) => {
+  const dbStatus = await checkDatabaseConnection();
+  res.json({
+    status: 'UP',
+    database: dbStatus ? 'CONNECTED' : 'DISCONNECTED',
+    environment: NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Enhanced Test Endpoint
 app.get('/test', async (req, res) => {
   try {
-    const [rows] = await pool.promise().query('SELECT 1 + 1 AS result');
-    res.json({ message: 'Conexión exitosa', result: rows[0].result });
+    const [testQuery, users] = await Promise.all([
+      pool.query('SELECT 1 + 1 AS result'),
+      pool.query('SELECT COUNT(*) AS count FROM users')
+    ]);
+    
+    res.json({
+      status: 'success',
+      dbConnection: 'OK',
+      testResult: testQuery[0][0].result,
+      totalUsers: users[0][0].count,
+      environment: {
+        dbHost: process.env.DB_HOST,
+        dbUser: process.env.DB_USER,
+        dbName: process.env.DB_NAME
+      }
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error en la conexión a la base de datos' });
+    console.error('Test endpoint error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Database connection error',
+      error: {
+        code: error.code,
+        errno: error.errno,
+        sqlMessage: error.sqlMessage
+      }
+    });
   }
 });
+
+// Main Endpoint
 app.get('/', (req, res) => {
-  res.send('Backend funcionando, prueba otras rutas como /test');
+  res.json({
+    message: 'Gym Management System API',
+    status: 'operational',
+    version: '1.0.0',
+    endpoints: {
+      health: 'GET /health',
+      test: 'GET /test',
+      login: 'POST /login',
+      registerClient: 'POST /register-client',
+      clients: 'GET /clients',
+      registerPayment: 'POST /register-payment',
+      paymentHistory: 'GET /payment-history'
+    }
+  });
 });
 
-// Login
+// Authentication Routes
 app.post('/login', async (req, res) => {
   const { dni } = req.body;
 
+  if (!dni) {
+    return res.status(400).json({ 
+      status: 'error',
+      message: 'DNI is required' 
+    });
+  }
+
   try {
-    const [rows] = await pool.promise().query('SELECT * FROM users WHERE dni = ?', [dni]);
+    const [users] = await pool.query(
+      'SELECT * FROM users WHERE dni = ?', 
+      [dni]
+    );
 
-    if (rows.length === 0) {
-      return res.status(401).json({ message: 'DNI no encontrado' });
+    if (users.length === 0) {
+      return res.status(404).json({ 
+        status: 'error',
+        message: 'User not found' 
+      });
     }
 
-    const user = rows[0];
-    const [planRows] = await pool.promise().query('SELECT * FROM plans WHERE id = ?', [user.plan_id]);
+    const user = users[0];
+    const [plans] = await pool.query(
+      'SELECT * FROM plans WHERE id = ?', 
+      [user.plan_id]
+    );
 
-    if (planRows.length === 0 || !planRows[0].can_access_client_panel) {
-      return res.status(403).json({ message: 'Tu plan no permite acceso al panel de clientes' });
+    if (plans.length === 0 || !plans[0].can_access_client_panel) {
+      return res.status(403).json({ 
+        status: 'error',
+        message: 'Access denied: Invalid plan or no panel access' 
+      });
     }
 
-    res.json({ message: 'Login exitoso', user });
+    res.json({ 
+      status: 'success',
+      message: 'Authentication successful',
+      user: {
+        id: user.id,
+        name: user.name,
+        dni: user.dni,
+        email: user.email,
+        plan: plans[0]
+      }
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al procesar el login' });
+    console.error('Login error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Server error during authentication',
+      error: error.message 
+    });
   }
 });
 
-// Registrar cliente
+// Client Management Routes
 app.post('/register-client', async (req, res) => {
   const { name, dni, email, phone, plan_id } = req.body;
 
-  try {
-    const [existingUser] = await pool.promise().query('SELECT * FROM users WHERE dni = ?', [dni]);
+  if (!name || !dni || !plan_id) {
+    return res.status(400).json({ 
+      status: 'error',
+      message: 'Name, DNI and Plan are required' 
+    });
+  }
 
-    if (existingUser.length > 0) {
-      return res.status(400).json({ message: 'El DNI ya está registrado' });
+  try {
+    const [existing] = await pool.query(
+      'SELECT id FROM users WHERE dni = ?', 
+      [dni]
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({ 
+        status: 'error',
+        message: 'DNI already registered' 
+      });
     }
 
-    await pool.promise().query(
-      'INSERT INTO users (name, dni, email, phone, role, plan_id, status) VALUES (?, ?, ?, ?, "client", ?, "active")',
+    const [result] = await pool.query(
+      `INSERT INTO users 
+       (name, dni, email, phone, role, plan_id, status) 
+       VALUES (?, ?, ?, ?, 'client', ?, 'active')`,
       [name, dni, email, phone, plan_id]
     );
 
-    res.status(201).json({ message: 'Cliente registrado correctamente' });
+    res.status(201).json({
+      status: 'success',
+      message: 'Client registered successfully',
+      clientId: result.insertId
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al registrar el cliente' });
+    console.error('Client registration error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error registering client',
+      error: error.sqlMessage 
+    });
   }
 });
 
-// Listar clientes
 app.get('/clients', async (req, res) => {
   try {
-    const [rows] = await pool.promise().query('SELECT * FROM users WHERE role = "client"');
-    res.json(rows);
+    const [clients] = await pool.query(`
+      SELECT u.*, p.name AS plan_name 
+      FROM users u
+      LEFT JOIN plans p ON u.plan_id = p.id
+      WHERE u.role = 'client'
+    `);
+    res.json({
+      status: 'success',
+      count: clients.length,
+      data: clients
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al obtener la lista de clientes' });
+    console.error('Get clients error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error fetching clients',
+      error: error.message 
+    });
   }
 });
 
-// Registrar pago
+// Payment Management Routes
 app.post('/register-payment', async (req, res) => {
   const { user_id, amount, month } = req.body;
 
+  if (!user_id || !amount || !month) {
+    return res.status(400).json({ 
+      status: 'error',
+      message: 'user_id, amount and month are required' 
+    });
+  }
+
+  let connection;
   try {
-    await pool.promise().query(
-      'INSERT INTO payments (user_id, amount, payment_date, month) VALUES (?, ?, CURDATE(), ?)',
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    await connection.query(
+      `INSERT INTO payments 
+       (user_id, amount, payment_date, month) 
+       VALUES (?, ?, CURDATE(), ?)`,
       [user_id, amount, month]
     );
 
-    await pool.promise().query(
-      'UPDATE users SET payment_status = "paid", next_payment_date = DATE_ADD(CURDATE(), INTERVAL 30 DAY) WHERE id = ?',
+    await connection.query(
+      `UPDATE users 
+       SET payment_status = 'paid', 
+           next_payment_date = DATE_ADD(CURDATE(), INTERVAL 30 DAY) 
+       WHERE id = ?`,
       [user_id]
     );
 
-    res.json({ message: 'Pago registrado correctamente' });
+    await connection.commit();
+    res.json({ 
+      status: 'success',
+      message: 'Payment registered successfully' 
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al registrar el pago' });
+    if (connection) await connection.rollback();
+    console.error('Payment registration error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error registering payment',
+      error: error.sqlMessage 
+    });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
-// Historial de pagos
 app.get('/payment-history', async (req, res) => {
   try {
-    const [rows] = await pool.promise().query(`
-      SELECT payments.*, users.name 
-      FROM payments 
-      JOIN users ON payments.user_id = users.id 
-      ORDER BY payment_date DESC
+    const [payments] = await pool.query(`
+      SELECT p.*, u.name AS user_name 
+      FROM payments p
+      JOIN users u ON p.user_id = u.id
+      ORDER BY p.payment_date DESC
+      LIMIT 100
     `);
-    res.json(rows);
+    res.json({
+      status: 'success',
+      count: payments.length,
+      data: payments
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al obtener el historial de pagos' });
+    console.error('Payment history error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error fetching payment history',
+      error: error.message 
+    });
   }
 });
 
-const PORT = process.env.PORT || 3001;
-pool.promise().query('SELECT 1')
-  .then(() => console.log('✅ Conexión a MySQL exitosa'))
-  .catch(err => console.error('❌ Error al conectar con MySQL:', err));
+// ======================
+// Error Handling
+// ======================
+app.use((req, res, next) => {
+  res.status(404).json({
+    status: 'error',
+    message: 'Endpoint not found'
+  });
+});
 
-app.listen(PORT, () => console.log(`🚀 Servidor corriendo en puerto ${PORT}`));
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  res.status(500).json({
+    status: 'error',
+    message: 'Internal server error',
+    error: NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+// ======================
+// Server Startup
+// ======================
+app.listen(PORT, async () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${NODE_ENV}`);
+  
+  try {
+    const [rows] = await pool.query('SELECT NOW() AS db_time');
+    console.log('✅ Database connection established');
+    console.log(`🕒 Database server time: ${rows[0].db_time}`);
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+  }
+});
