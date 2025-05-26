@@ -108,12 +108,13 @@ app.post('/login', async (req, res) => {
 
     const user = users[0];
 
+    // 🔹 Corrección: Asegurar que el frontend recibe los datos correctamente
     res.json({
       status: 'success',
       message: 'Autenticación exitosa',
-      user: { // 🔹 Asegura que `user` está bien estructurado
+      user: {
         id: user.id,
-        nombre: user.nombre,
+        nombre: user.nombre,  // 🔹 Cambio aquí
         dni: user.dni,
         email: user.correo_electronico,
         plan_id: user.plan_id,
@@ -121,7 +122,14 @@ app.post('/login', async (req, res) => {
       }
     });
 
-    console.log("🔹 Respuesta enviada al frontend:", user);
+    console.log("🔹 Respuesta enviada al frontend:", {
+      id: user.id,
+      nombre: user.nombre,
+      dni: user.dni,
+      email: user.correo_electronico,
+      plan_id: user.plan_id,
+      estado: user.estado
+    });
   } catch (error) {
     console.error("❌ Error en /login:", error);
     res.status(500).json({ status: 'error', message: 'Error en el servidor' });
