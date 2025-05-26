@@ -123,14 +123,11 @@ app.get('/', (req, res) => {
 // Autenticación
 // ======================
 app.post('/login', async (req, res) => {
-  const { dni } = req.body;
-console.log("Intentando autenticación para DNI:", dni);
-  if (!dni) {
-    return res.status(400).json({ status: 'error', message: 'DNI es requerido' });
-  }
+  console.log("Intentando autenticación para DNI:", req.body.dni); // 🔍 Verifica que el backend recibe correctamente el DNI
 
   try {
-    const [users] = await pool.query('SELECT * FROM users WHERE dni = ?', [dni]);
+    const [users] = await pool.query('SELECT * FROM users WHERE dni = ?', [req.body.dni]);
+    console.log("Usuarios encontrados:", users); // 🔍 Verifica si hay resultados
 
     if (users.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Usuario no encontrado' });
@@ -141,8 +138,10 @@ console.log("Intentando autenticación para DNI:", dni);
       message: 'Autenticación exitosa',
       user: users[0]
     });
+
+    console.log("Respuesta enviada al frontend:", users[0]); // 🔍 Muestra qué datos se están enviando
   } catch (error) {
-    console.error('Error en /login:', error);
+    console.error("❌ Error en /login:", error);
     res.status(500).json({ status: 'error', message: 'Error en el servidor' });
   }
 });
