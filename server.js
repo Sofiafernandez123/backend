@@ -39,9 +39,9 @@ app.listen(PORT, async () => {
 // Middlewares
 // ======================
 app.use(cors({
-  origin: 'https://redmyclub.com.ar/login', // Puedes cambiarlo por el dominio del frontend en producción
+  origin: 'https://redmyclub.com.ar', // 🔹 No agregues '/login'
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
