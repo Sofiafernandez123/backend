@@ -4,7 +4,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const { pool } = require('./db');
 
-const app = express(); // 🔹 Debes definir `app` ANTES de usarlo
+const app = express();
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'production';
 
@@ -12,34 +12,7 @@ const NODE_ENV = process.env.NODE_ENV || 'production';
 // Middlewares
 // ======================
 app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
-}));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-// ======================
-// Inicio del servidor
-// ======================
-app.listen(PORT, async () => {
-  console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
-  console.log(`🌐 Entorno: ${NODE_ENV}`);
-
-  try {
-    const [rows] = await pool.query('SELECT NOW() AS db_time');
-    console.log('✅ Conexión a la base de datos establecida');
-    console.log(`🕒 Hora del servidor de la base de datos: ${rows[0].db_time}`);
-  } catch (error) {
-    console.error('❌ Error en la conexión a la base de datos:', error);
-  }
-});
-
-// ======================
-// Middlewares
-// ======================
-app.use(cors({
-  origin: 'https://redmyclub.com.ar', // 🔹 No agregues '/login'
+  origin: ['https://redmyclub.com.ar'], // 🔹 Permite solo el dominio correcto
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -89,7 +62,7 @@ app.get('/test', async (req, res) => {
       pool.query('SELECT 1 + 1 AS result'),
       pool.query('SELECT COUNT(*) AS count FROM users')
     ]);
-    
+
     res.json({
       status: 'success',
       testResult: testQuery[0][0].result,
@@ -123,23 +96,27 @@ app.get('/', (req, res) => {
 // Autenticación
 // ======================
 app.post('/login', async (req, res) => {
-  console.log("Intentando autenticación para DNI:", req.body.dni); // 🔍 Verifica que el backend recibe correctamente el DNI
+  console.log("Intentando autenticación para DNI:", req.body.dni);
 
   try {
     const [users] = await pool.query('SELECT * FROM users WHERE dni = ?', [req.body.dni]);
-    console.log("Usuarios encontrados:", users); // 🔍 Verifica si hay resultados
+    console.log("Usuarios encontrados:", users);
 
     if (users.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Usuario no encontrado' });
     }
 
+    const user = users[0];
+
     res.json({
       status: 'success',
       message: 'Autenticación exitosa',
-      user: users[0]
+      nombre: user.nombre, // 🔹 Corrección aquí
+      dni: user.dni,
+      email: user.correo_electronico
     });
 
-    console.log("Respuesta enviada al frontend:", users[0]); // 🔍 Muestra qué datos se están enviando
+    console.log("Respuesta enviada al frontend:", user);
   } catch (error) {
     console.error("❌ Error en /login:", error);
     res.status(500).json({ status: 'error', message: 'Error en el servidor' });
@@ -161,4 +138,7 @@ app.use((err, req, res, next) => {
 // ======================
 // Inicio del servidor
 // ======================
-
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
+  console.log(`🌐 Entorno: ${NODE_ENV}`);
+});
