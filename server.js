@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const bodyParser = require('body-parser');
 const { pool } = require('./db');
-
+const jwt = require('jsonwebtoken');
 // Inicialización de la aplicación
 const app = express();
 const PORT = process.env.PORT || 3001;
