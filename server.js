@@ -111,17 +111,23 @@ app.post('/login', async (req, res) => {
     res.json({
       status: 'success',
       message: 'Autenticación exitosa',
-      nombre: user.nombre, // 🔹 Corrección aquí
-      dni: user.dni,
-      email: user.correo_electronico
+      user: { // 🔹 Asegura que `user` está bien estructurado
+        id: user.id,
+        nombre: user.nombre,
+        dni: user.dni,
+        email: user.correo_electronico,
+        plan_id: user.plan_id,
+        estado: user.estado
+      }
     });
 
-    console.log("Respuesta enviada al frontend:", user);
+    console.log("🔹 Respuesta enviada al frontend:", user);
   } catch (error) {
     console.error("❌ Error en /login:", error);
     res.status(500).json({ status: 'error', message: 'Error en el servidor' });
   }
 });
+
 
 // ======================
 // Manejo de errores
