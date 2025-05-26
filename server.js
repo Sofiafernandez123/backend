@@ -1,28 +1,75 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const bodyParser = require('body-parser');
 const { pool } = require('./db');
 
+// Inicialización de la aplicación
 const app = express();
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'production';
 
 // ======================
-// Middlewares
+// Configuración de Seguridad
 // ======================
-app.use(cors({
-  origin: ['https://redmyclub.com.ar'],
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+
+// Configuración de CORS
+const corsOptions = {
+  origin: [
+    'https://redmyclub.com.ar',
+    'https://www.redmyclub.com.ar',
+    'http://localhost:3000' // Solo para desarrollo
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept'
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200,
+  maxAge: 86400
+};
+
+// Middlewares de seguridad
+app.use(helmet());
+app.disable('x-powered-by');
+app.use(cors(corsOptions));
+
+// Limitador de tasa para prevenir ataques de fuerza bruta
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100, // límite de 100 peticiones por IP
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(limiter);
+
+// Configuración de body parser
+app.use(bodyParser.json({ limit: '10kb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10kb' }));
+
+// Cabeceras de seguridad personalizadas
+app.use((req, res, next) => {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 
 // ======================
 // Logging en desarrollo
 // ======================
 if (NODE_ENV === 'development') {
+  const morgan = require('morgan');
+  app.use(morgan('dev'));
+  
   app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
     next();
@@ -72,7 +119,11 @@ app.get('/test', async (req, res) => {
     });
   } catch (error) {
     console.error('Error en /test:', error);
-    res.status(500).json({ status: 'error', message: 'Error en la base de datos' });
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Error en la base de datos',
+      error: NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -82,6 +133,7 @@ app.get('/', (req, res) => {
     message: 'Gym Management System API',
     status: 'operational',
     version: '1.0.0',
+    environment: NODE_ENV,
     endpoints: {
       health: 'GET /health',
       test: 'GET /test',
@@ -101,7 +153,10 @@ app.post('/login', async (req, res) => {
   const { dni } = req.body;
 
   if (!dni) {
-    return res.status(400).json({ status: 'error', message: 'DNI requerido para iniciar sesión' });
+    return res.status(400).json({ 
+      status: 'error', 
+      message: 'DNI requerido para iniciar sesión' 
+    });
   }
 
   console.log("🔍 Intentando autenticación para DNI:", dni);
@@ -111,18 +166,27 @@ app.post('/login', async (req, res) => {
     console.log("🛠 Datos obtenidos de la DB:", users);
 
     if (users.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'Usuario no encontrado' });
+      return res.status(404).json({ 
+        status: 'error', 
+        message: 'Usuario no encontrado' 
+      });
     }
 
     const user = users[0];
 
-    // 🔹 Corrección: Usar `name` en lugar de `nombre`
+    // Generar token JWT (opcional)
+    const token = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '1h' }
+    );
+
     const responseData = {
       status: 'success',
       message: 'Autenticación exitosa',
       user: {
         id: user.id,
-        name: user.name, // 🔹 Corrección aquí
+        name: user.name,
         dni: user.dni,
         email: user.email,
         phone: user.phone,
@@ -131,14 +195,29 @@ app.post('/login', async (req, res) => {
         status: user.status,
         next_payment_date: user.next_payment_date,
         payment_status: user.payment_status
-      }
+      },
+      token: token
     };
+
+    // Configurar cookie HTTP-only para producción
+    if (NODE_ENV === 'production') {
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        maxAge: 3600000 // 1 hora
+      });
+    }
 
     console.log("📢 Respuesta enviada al frontend:", responseData);
     res.json(responseData);
   } catch (error) {
     console.error("❌ Error en /login:", error);
-    res.status(500).json({ status: 'error', message: 'Error en el servidor' });
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Error en el servidor',
+      error: NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -146,12 +225,28 @@ app.post('/login', async (req, res) => {
 // Manejo de errores
 // ======================
 app.use((req, res) => {
-  res.status(404).json({ status: 'error', message: 'Endpoint no encontrado' });
+  res.status(404).json({ 
+    status: 'error', 
+    message: 'Endpoint no encontrado' 
+  });
 });
 
 app.use((err, req, res, next) => {
   console.error('Error global:', err);
-  res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+  
+  // Manejo específico para errores JWT
+  if (err.name === 'UnauthorizedError') {
+    return res.status(401).json({ 
+      status: 'error', 
+      message: 'Token inválido o expirado' 
+    });
+  }
+
+  res.status(500).json({ 
+    status: 'error', 
+    message: 'Error interno del servidor',
+    error: NODE_ENV === 'development' ? err.message : undefined
+  });
 });
 
 // ======================
@@ -160,4 +255,6 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
   console.log(`🌐 Entorno: ${NODE_ENV}`);
+  console.log(`🔒 Modo seguro: ${process.env.NODE_ENV === 'production' ? 'ACTIVADO' : 'DESACTIVADO'}`);
+  console.log(`🛡️ CORS configurado para: ${corsOptions.origin.join(', ')}`);
 });
