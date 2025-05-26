@@ -8,7 +8,7 @@ const app = express();
 // ======================
 // Configuration
 // ======================
-const PORT = process.env.APP_PORT || 3001;
+const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // ======================
