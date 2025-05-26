@@ -12,14 +12,16 @@ const NODE_ENV = process.env.NODE_ENV || 'production';
 // Middlewares
 // ======================
 app.use(cors({
-  origin: ['https://redmyclub.com.ar'], // 🔹 Permite solo el dominio correcto
+  origin: ['https://redmyclub.com.ar'],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Logging middleware para desarrollo
+// ======================
+// Logging en desarrollo
+// ======================
 if (NODE_ENV === 'development') {
   app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -28,7 +30,7 @@ if (NODE_ENV === 'development') {
 }
 
 // ======================
-// Verificación de base de datos
+// Verificación de conexión a la base de datos
 // ======================
 const checkDatabaseConnection = async () => {
   try {
@@ -44,7 +46,7 @@ const checkDatabaseConnection = async () => {
 // Rutas
 // ======================
 
-// Comprobación de estado del backend
+// Estado del backend
 app.get('/health', async (req, res) => {
   const dbStatus = await checkDatabaseConnection();
   res.json({
@@ -96,11 +98,17 @@ app.get('/', (req, res) => {
 // Autenticación
 // ======================
 app.post('/login', async (req, res) => {
-  console.log("Intentando autenticación para DNI:", req.body.dni);
+  const { dni } = req.body;
+
+  if (!dni) {
+    return res.status(400).json({ status: 'error', message: 'DNI requerido para iniciar sesión' });
+  }
+
+  console.log("🔍 Intentando autenticación para DNI:", dni);
 
   try {
-    const [users] = await pool.query('SELECT * FROM users WHERE dni = ?', [req.body.dni]);
-    console.log("Usuarios encontrados:", users);
+    const [users] = await pool.query('SELECT * FROM users WHERE dni = ?', [dni]);
+    console.log("🛠 Datos obtenidos de la DB:", users);
 
     if (users.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Usuario no encontrado' });
@@ -108,34 +116,31 @@ app.post('/login', async (req, res) => {
 
     const user = users[0];
 
-    // 🔹 Corrección: Asegurar que el frontend recibe los datos correctamente
-    res.json({
+    // 🔹 Corrección: Usar `name` en lugar de `nombre`
+    const responseData = {
       status: 'success',
       message: 'Autenticación exitosa',
       user: {
         id: user.id,
-        nombre: user.nombre,  // 🔹 Cambio aquí
+        name: user.name, // 🔹 Corrección aquí
         dni: user.dni,
-        email: user.correo_electronico,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
         plan_id: user.plan_id,
-        estado: user.estado
+        status: user.status,
+        next_payment_date: user.next_payment_date,
+        payment_status: user.payment_status
       }
-    });
+    };
 
-    console.log("🔹 Respuesta enviada al frontend:", {
-      id: user.id,
-      nombre: user.nombre,
-      dni: user.dni,
-      email: user.correo_electronico,
-      plan_id: user.plan_id,
-      estado: user.estado
-    });
+    console.log("📢 Respuesta enviada al frontend:", responseData);
+    res.json(responseData);
   } catch (error) {
     console.error("❌ Error en /login:", error);
     res.status(500).json({ status: 'error', message: 'Error en el servidor' });
   }
 });
-
 
 // ======================
 // Manejo de errores
